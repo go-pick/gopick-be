@@ -102,4 +102,34 @@ userRouter.post('/login', async (req, res) => {
 	}
 });
 
+userRouter.get('/me', async (req, res) => {
+	try {
+		const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            return res.status(400).json({error: "No authorization header"});
+        }
+        const token = authHeader.split(' ')[1];
+
+        // 1. 이 함수가 토큰 검증과 유저 정보 조회를 모두 처리합니다.
+        const { data: {user}, error: authError } = await supabase.auth.getUser(token);
+        
+        if (authError || !user) {
+            return res.status(401).json({ error: 'Invalid token', details: authError?.message });
+        }
+
+		const username = user.user_metadata?.username;
+
+        if (!username) {
+            return res.status(404).json({ error: 'Username not found in user metadata' });
+        }
+
+        // 4. 즉시 응답
+        res.json({ username: username });
+
+	} catch(error) {
+		console.error("error in /auth/me: ", error.message);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
 export default userRouter;
