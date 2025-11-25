@@ -1,7 +1,11 @@
 import express from 'express';
 import { supabase } from '../config/supabaseClient.js';
+import dotenv from 'dotenv'; 
+dotenv.config();
 
 const userRouter = express.Router();
+
+const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000"
 
 userRouter.post('/signup', async (req, res) => {
 	const { username, email, password } = req.body;
@@ -19,7 +23,7 @@ userRouter.post('/signup', async (req, res) => {
 				data: {
 					username: username
 				},
-				emailRedirectTo: 'http://localhost:3000/verify-email'
+				emailRedirectTo: `${CLIENT_URL}/verify-email`
 			}
 		});
 
@@ -109,8 +113,6 @@ userRouter.get('/me', async (req, res) => {
             return res.status(400).json({error: "No authorization header"});
         }
         const token = authHeader.split(' ')[1];
-
-        // 1. 이 함수가 토큰 검증과 유저 정보 조회를 모두 처리합니다.
         const { data: {user}, error: authError } = await supabase.auth.getUser(token);
         
         if (authError || !user) {
@@ -123,13 +125,75 @@ userRouter.get('/me', async (req, res) => {
             return res.status(404).json({ error: 'Username not found in user metadata' });
         }
 
-        // 4. 즉시 응답
         res.json({ username: username });
 
 	} catch(error) {
 		console.error("error in /auth/me: ", error.message);
 		res.status(500).json({ error: 'Server error' });
 	}
+});
+
+userRouter.post('/password-reset/request', async (req, res) => {
+	const { email } = req.body;
+
+	if (!email) {
+		return res.status(400).json({ error: '이메일은 필수입니다.'});
+	}
+
+	try {
+		const { error } = await supabase.auth.resetPasswordForEmail(email, {
+			redirectTo: `${CLIENT_URL}/mypage/password`
+		})
+		if (error) {
+			console.error('Supabase password reset request error: ', error.message);
+			return res.status(400).json({ error: error.message });
+		}
+
+		res.status(200).json({ message: '비밀번호 재설정 메일이 발송되었습니다.' });
+	} catch (error) {
+		console.error('Server password reset request error:', error);
+		res.status(500).json({ error: '서버 내부 오류가 발생했습니다.'});
+	}
+});
+
+userRouter.post('/password-reset/confirm', async (req, res) => {
+	const { password } = req.body;
+	const authHeader = req.headers.authorization;
+
+	if (!password) {
+		return res.status(400).json({ error: '새 비밀번호를 입력해주세요.' });
+	}
+
+	if (!authHeader) {
+		return res.status(401).json({ error: '인증 토큰이 필요합니다.' });
+	}
+
+	const token = authHeader.split(' ')[1];
+
+	try {
+		const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+		if (authError || !user) {
+			return res.status(401).json({ error: '유효하지 않거나 만료된 토큰입니다.' });
+		}
+		
+		const { error: updateError } = await supabase.auth.admin.updateUserById(
+			user.id,
+			{ password: password }
+		);
+
+		if (updateError) {
+			console.error('Supabase password update error:', updateError.message);
+			return res.status(400).json({ error: '비밀번호 변경에 실패했습니다.' });
+		}
+
+		res.status(200).json({ message: '비밀번호가 성공적으로 변경되었습니다.' });
+
+	} catch (error) {
+		console.error('Server password reset confirm error:', err);
+        res.status(500).json({ error: '서버 내부 오류가 발생했습니다.' });
+	}
+
 });
 
 export default userRouter;

@@ -4,11 +4,17 @@ import cors from 'cors';
 import makerRouter from './routes/makers.js';
 import userRouter from './routes/users.js';
 
+import dotenv from 'dotenv'; 
+dotenv.config();
+
 const app = express();
 const PORT = process.env.PORT || 3001;
+const CLIENT = process.env.CLIENT_URL
 
 app.use(cors({
-  origin: 'http://localhost:3000'
+  origin: CLIENT,
+  credentials: true,
+  optionsSuccessStatus: 200
 }));
 app.use(express.json());
 
