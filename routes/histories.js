@@ -9,6 +9,13 @@ historyRouter.get('/', async (req, res) => {
 		if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
 		const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+		if (authError) {
+		console.error("🔥 인증 실패 원인:", authError.message);
+		// 토큰이 이상한지 확인하기 위해 앞부분만 살짝 출력
+		console.log("받은 토큰(앞 20자):", token.substring(0, 20)); 
+}
+
 		if (authError || !user) return res.status(401).json({ error: 'Invalid token' });
 
 		// 1. 조회
