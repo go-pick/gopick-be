@@ -15,7 +15,10 @@ const PORT = process.env.PORT || 3001;
 const CLIENT = process.env.CLIENT_URL
 
 app.use(cors({
-	origin: CLIENT,
+	origin: [
+		CLIENT,
+		'https://go-pick.github.io'
+	],
 	credentials: true,
 	optionsSuccessStatus: 200
 }));
@@ -29,7 +32,7 @@ app.use('/categories', categoryRouter);
 
 app.use('/products', productRouter);
 
-app.use('/histories', historyRouter);
+app.use('/history', historyRouter);
 
 app.listen(PORT, () => {
 	console.log(`🚀 '고를만해' 백엔드 서버가 포트 ${PORT}에서 실행 중입니다!`);

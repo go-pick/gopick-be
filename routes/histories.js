@@ -3,7 +3,6 @@ import { supabase } from '../config/supabaseClient.js';
 
 const historyRouter = express.Router();
 
-// GET /api/history (내 기록 목록 조회)
 historyRouter.get('/', async (req, res) => {
 	try {
 		const token = req.headers.authorization?.split(' ')[1];
@@ -12,21 +11,17 @@ historyRouter.get('/', async (req, res) => {
 		const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 		if (authError || !user) return res.status(401).json({ error: 'Invalid token' });
 
-		// 1. History 조회 (최신순 정렬)
-		// score 테이블을 조인해서 제품 정보와 점수를 가져옵니다.
+		// 1. 조회
 		const { data, error } = await supabase
 			.from('history')
 			.select(`
 				id,
 				created_at,
 				preference,
+				category:category_id ( id, name, specs ),
 				score (
 					score,
-					variant_id,
-					product_variants (
-						variant_name,
-						product ( name )
-					)
+					product_variants ( product ( name ) )
 				)
 			`)
 			.eq('user_id', user.id)
@@ -35,48 +30,142 @@ historyRouter.get('/', async (req, res) => {
 
 		if (error) throw error;
 
-		// 2. 데이터 가공 (프론트에서 보여주기 좋게)
-		const formattedData = data.map(item => {
-			// 점수순 정렬
-			const scores = item.score.sort((a, b) => b.score - a.score);
+		// 2. 데이터 가공
+		const formattedList = data.map((item, index) => {
+			const scores = item.score || [];
+			scores.sort((a, b) => b.score - a.score);
 			
-			// 1등 제품 이름 찾기
-			const winner = scores[0];
-			const winnerName = winner?.product_variants?.product?.name || '제품';
-			
-			// 제목 생성 (A안: 1등 외 N개)
+			const winnerName = scores[0]?.product_variants?.product?.name || '제품';
 			const count = scores.length;
-			const title = count > 1 
-				? `${winnerName} 외 ${count - 1}개 비교` 
-				: `${winnerName} 비교`
-			;
+			const title = count > 1 ? `${winnerName} 외 ${count - 1}개 비교` : `${winnerName} 비교`;
 
-			// 중요 스펙 목록 문자열 생성
-			// preference: { battery: 5, price: 3, ... }
-			const importantSpecs = Object.entries(item.preference || {})
-				.filter(([key, value]) => value > 0 && key !== 'price') // 가격 제외하고 스펙만? (선택사항)
-				.map(([key]) => key)
-			; // 한글 변환은 프론트에서 처리 추천
-				
+			// --- [진단 로그 시작] (첫 번째 아이템만 상세 출력) ---
+			const categoryData = Array.isArray(item.category) ? item.category[0] : item.category;
+			const specsList = categoryData?.specs || [];
+
+			const summarySpecs = Object.entries(item.preference || {})
+				.filter(([key, val]) => val > 0)
+				.map(([key]) => {
+					if (key === 'price') return '가격';
+
+					// 매핑 로직 (기존 유지)
+					const foundSpec = specsList.find(s => s.eng_name === key);
+					
+					if (foundSpec) {
+						return foundSpec.kor_name;
+					}
+				});
+
 			return {
 				id: item.id,
 				created_at: item.created_at,
 				title: title,
-				specs: importantSpecs, // ['battery', 'weight'] 형태
-				preference: item.preference // 상세페이지용
+				specsSummary: summarySpecs 
 			};
 		});
-		
-		res.json(formattedData);
+
+		res.json(formattedList);
+
 	} catch (error) {
-		console.error("History fetch error:", error);
-		res.status(500).json({ error: 'Failed to fetch history' });
+		res.status(500).json({ error: 'Failed to fetch history list' });
 	}
 });
 
-// GET /api/history/:id (상세 조회 - 결과 페이지 복원용)
 historyRouter.get('/:id', async (req, res) => {
-    // ... (상세 페이지 구현 시 필요, 일단 목록부터)
-});
+    try {
+        const { id } = req.params;
+        
+        // 1. 토큰 인증
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
+        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+        if (authError || !user) return res.status(401).json({ error: 'Invalid token' });
+
+        // 2. 상세 데이터 조회
+        const { data: historyItem, error } = await supabase
+            .from('history')
+            .select(`
+                id,
+                created_at,
+                preference,
+                category:category_id ( id, name, specs ),
+                score (
+                    score,
+                    variant_id,
+                    product_variants (
+                        id,
+                        price,
+                        option_specs,
+                        variant_name,
+                        product (
+                            name,
+                            image_url,
+                            common_specs,
+                            maker:maker_id ( name )
+                        )
+                    )
+                )
+            `)
+            .eq('id', id)
+            .eq('user_id', user.id) // 내 기록인지 확인
+            .single();
+
+        // [진단 3] DB 조회 결과 확인
+        if (error) {
+            console.error("[BE] DB 조회 에러:", error);
+        } else if (!historyItem) {
+            console.error("[BE] 데이터 없음 (Row not found)");
+        } else {
+            console.log("[BE] 데이터 조회 성공!");
+        }
+
+        if (error || !historyItem) {
+            return res.status(404).json({ error: 'History not found' });
+        }
+
+        // ... (이하 데이터 가공 및 응답 로직은 기존과 동일) ...
+        
+        // (편의를 위해 아래 부분은 기존 코드를 유지하세요)
+        const categorySpecs = Array.isArray(historyItem.category) ? historyItem.category[0]?.specs : historyItem.category?.specs;
+        const priceSpecDef = { eng_name: 'price', kor_name: '가격', unit: '원', is_positive: false, icon_key: 'price' };
+        const dbSpecs = (categorySpecs || []).filter(s => s.eng_name.toLowerCase() !== 'price');
+        const specDefinitions = [priceSpecDef, ...dbSpecs];
+
+        const scores = historyItem.score || [];
+        scores.sort((a, b) => b.score - a.score);
+
+        const mergeSpecs = (variant) => ({
+            price: variant.price,
+            ...(variant.product?.common_specs || {}),
+            ...(variant.option_specs || {})
+        });
+
+        const rankedData = scores.map(s => {
+            const v = s.product_variants;
+            const p = v.product;
+            return {
+                unique_id: s.variant_id,
+                name: p.name,
+                variant_name: v.variant_name,
+                brand: p.maker?.name || 'Unknown',
+                image_url: p.image_url,
+                price: v.price,
+                score: s.score,
+                specs: mergeSpecs(v)
+            };
+        });
+
+        res.json({
+            rankedData: rankedData,
+            specDefinitions: specDefinitions,
+            weights: historyItem.preference,
+            created_at: historyItem.created_at
+        });
+
+    } catch (error) {
+        console.error("History Detail Error:", error);
+        res.status(500).json({ error: 'Failed to fetch history detail' });
+    }
+});
 export default historyRouter;
