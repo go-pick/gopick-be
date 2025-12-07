@@ -215,26 +215,49 @@ productRouter.post('/calculate', async (req, res) => {
 
 
         // =========================================================
-        // [STEP 5] DB 저장 (반드시 calculated가 만들어진 뒤에!)
+        // [STEP 5] DB 저장 (제목과 요약 생성 로직 추가)
         // =========================================================
         if (token) {
             console.log("[BE] DB 저장 로직 진입...");
             const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
             if (user && !authError) {
-                // History 생성
+                
+                // --- [NEW] 1. 제목(Title) 생성 로직 ---
+                // calculated는 이미 점수 순으로 정렬되어 있으므로 0번째가 1등입니다.
+                const winnerName = calculated[0]?.name || '제품';
+                const count = calculated.length;
+                // 예: "Galaxy S24 외 2개 비교" 또는 "iPhone 15 비교"
+                const generatedTitle = count > 1 
+                    ? `${winnerName} 외 ${count - 1}개 비교` 
+                    : `${winnerName} 비교`;
+
+                // --- [NEW] 2. 요약(Summary) 생성 로직 ---
+                // 가중치가 0보다 큰 항목들의 한글 이름만 뽑아서 콤마로 연결
+                const generatedSummary = Object.entries(weights)
+                    .filter(([key, val]) => val > 0) // 가중치 있는 것만
+                    .map(([key]) => {
+                        const spec = specDefinitions.find(s => s.eng_name === key);
+                        return spec ? spec.kor_name : null;
+                    })
+                    .filter(Boolean) // null값 제거
+                    .join(', '); // 예: "가격, 화면크기, 배터리"
+
+                // --- 3. History 생성 (title, summary 포함) ---
                 const { data: historyData, error: historyError } = await supabase
                     .from('history')
                     .insert({
                         user_id: user.id,
                         category_id: categoryId,
-                        preference: weights
+                        preference: weights,
+                        title: generatedTitle,    // <--- 추가됨!
+                        summary: generatedSummary // <--- 추가됨!
                     })
                     .select()
                     .single();
 
                 if (!historyError && historyData) {
-                    // Score 저장 (calculated 변수 사용)
+                    // Score 저장 (기존 로직 동일)
                     const scoreInserts = calculated.map((item) => ({
                         history_id: historyData.id,
                         variant_id: item.unique_id, 
@@ -246,7 +269,7 @@ productRouter.post('/calculate', async (req, res) => {
                         .insert(scoreInserts);
 
                     if (scoreError) console.error("[BE] Score 저장 실패:", scoreError);
-                    else console.log(`[BE] DB 저장 완료 (User: ${user.id})`);
+                    else console.log(`[BE] DB 저장 완료 (ID: ${historyData.id})`);
                 } else {
                     console.error("[BE] History 생성 실패:", historyError);
                 }

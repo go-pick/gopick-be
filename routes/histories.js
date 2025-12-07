@@ -3,81 +3,74 @@ import { supabase } from '../config/supabaseClient.js';
 
 const historyRouter = express.Router();
 
+// =========================================================
+// [GET] 내역 리스트 조회 (최적화 버전) + 페이징
+// =========================================================
 historyRouter.get('/', async (req, res) => {
-	try {
-		const token = req.headers.authorization?.split(' ')[1];
-		if (!token) return res.status(401).json({ error: 'Unauthorized' });
+    try {
+        // 1. 토큰 검증
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
-		const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+        if (authError || !user) return res.status(401).json({ error: 'Invalid token' });
 
-		if (authError) {
-		console.error("🔥 인증 실패 원인:", authError.message);
-		// 토큰이 이상한지 확인하기 위해 앞부분만 살짝 출력
-		console.log("받은 토큰(앞 20자):", token.substring(0, 20)); 
-}
+        // 2. 페이지네이션 계산 (핵심!)
+        // 프론트에서 ?page=2&limit=10 처럼 보냅니다.
+        const page = parseInt(req.query.page) || 1; 
+        const limit = parseInt(req.query.limit) || 10; 
+        
+        // Supabase range는 0부터 시작하므로 계산식은 다음과 같습니다.
+        // page 1 -> from: 0, to: 9
+        // page 2 -> from: 10, to: 19
+        const from = (page - 1) * limit;
+        const to = from + limit - 1;
 
-		if (authError || !user) return res.status(401).json({ error: 'Invalid token' });
+        // 3. 데이터 조회 (최적화 버전)
+        // 조인 없이 history 테이블만 조회하므로 매우 빠릅니다.
+        const { data, error, count } = await supabase
+            .from('history')
+            .select(`
+                id,
+                created_at,
+                title,   
+                summary  
+            `, { count: 'exact' }) // 전체 데이터 개수도 같이 세기
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .range(from, to); // 여기서 범위를 자릅니다
 
-		// 1. 조회
-		const { data, error } = await supabase
-			.from('history')
-			.select(`
-				id,
-				created_at,
-				preference,
-				category:category_id ( id, name, specs ),
-				score (
-					score,
-					product_variants ( product ( name ) )
-				)
-			`)
-			.eq('user_id', user.id)
-			.order('created_at', { ascending: false })
-		;
+        if (error) throw error;
 
-		if (error) throw error;
+        // 4. 응답 포맷 맞추기
+        const formattedList = data.map((item) => {
+            // DB에는 문자열("가격, 화면")로 저장되어 있지만, 
+            // 프론트엔드는 배열(["가격", "화면"])을 원하므로 변환해줍니다.
+            const summaryArray = item.summary ? item.summary.split(', ') : [];
 
-		// 2. 데이터 가공
-		const formattedList = data.map((item, index) => {
-			const scores = item.score || [];
-			scores.sort((a, b) => b.score - a.score);
-			
-			const winnerName = scores[0]?.product_variants?.product?.name || '제품';
-			const count = scores.length;
-			const title = count > 1 ? `${winnerName} 외 ${count - 1}개 비교` : `${winnerName} 비교`;
+            return {
+                id: item.id,
+                created_at: item.created_at,
+                // 과거 데이터라 title이 없으면 기본값
+                title: item.title || '상세 비교 내역', 
+                specsSummary: summaryArray 
+            };
+        });
 
-			// --- [진단 로그 시작] (첫 번째 아이템만 상세 출력) ---
-			const categoryData = Array.isArray(item.category) ? item.category[0] : item.category;
-			const specsList = categoryData?.specs || [];
+        // 5. 리스트와 전체 개수를 함께 반환
+        res.json({
+            list: formattedList,
+            totalCount: count || 0
+        });
 
-			const summarySpecs = Object.entries(item.preference || {})
-				.filter(([key, val]) => val > 0)
-				.map(([key]) => {
-					if (key === 'price') return '가격';
-
-					// 매핑 로직 (기존 유지)
-					const foundSpec = specsList.find(s => s.eng_name === key);
-					
-					if (foundSpec) {
-						return foundSpec.kor_name;
-					}
-				});
-
-			return {
-				id: item.id,
-				created_at: item.created_at,
-				title: title,
-				specsSummary: summarySpecs 
-			};
-		});
-
-		res.json(formattedList);
-
-	} catch (error) {
-		res.status(500).json({ error: 'Failed to fetch history list' });
-	}
+    } catch (error) {
+        console.error("History List Error:", error);
+        res.status(500).json({ error: 'Failed to fetch history list' });
+    }
 });
 
+// =========================================================
+// [GET] 상세 조회 (기존 유지)
 historyRouter.get('/:id', async (req, res) => {
     try {
         const { id } = req.params;
@@ -89,7 +82,7 @@ historyRouter.get('/:id', async (req, res) => {
         const { data: { user }, error: authError } = await supabase.auth.getUser(token);
         if (authError || !user) return res.status(401).json({ error: 'Invalid token' });
 
-        // 2. 상세 데이터 조회
+        // 2. 상세 데이터 조회 (기존 로직 유지)
         const { data: historyItem, error } = await supabase
             .from('history')
             .select(`
@@ -115,39 +108,35 @@ historyRouter.get('/:id', async (req, res) => {
                 )
             `)
             .eq('id', id)
-            .eq('user_id', user.id) // 내 기록인지 확인
+            .eq('user_id', user.id)
             .single();
-
-        // [진단 3] DB 조회 결과 확인
-        if (error) {
-            console.error("[BE] DB 조회 에러:", error);
-        } else if (!historyItem) {
-            console.error("[BE] 데이터 없음 (Row not found)");
-        } else {
-            console.log("[BE] 데이터 조회 성공!");
-        }
 
         if (error || !historyItem) {
             return res.status(404).json({ error: 'History not found' });
         }
 
-        // ... (이하 데이터 가공 및 응답 로직은 기존과 동일) ...
+        // --- 데이터 가공 (기존 코드와 동일) ---
         
-        // (편의를 위해 아래 부분은 기존 코드를 유지하세요)
+        // 카테고리 스펙 정의 가져오기
         const categorySpecs = Array.isArray(historyItem.category) ? historyItem.category[0]?.specs : historyItem.category?.specs;
         const priceSpecDef = { eng_name: 'price', kor_name: '가격', unit: '원', is_positive: false, icon_key: 'price' };
+        
+        // 'price' 중복 제거 후 병합
         const dbSpecs = (categorySpecs || []).filter(s => s.eng_name.toLowerCase() !== 'price');
         const specDefinitions = [priceSpecDef, ...dbSpecs];
 
+        // 점수 내림차순 정렬
         const scores = historyItem.score || [];
         scores.sort((a, b) => b.score - a.score);
 
+        // 스펙 병합 헬퍼 함수
         const mergeSpecs = (variant) => ({
             price: variant.price,
             ...(variant.product?.common_specs || {}),
             ...(variant.option_specs || {})
         });
 
+        // 랭킹 데이터 생성
         const rankedData = scores.map(s => {
             const v = s.product_variants;
             const p = v.product;
@@ -175,4 +164,5 @@ historyRouter.get('/:id', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch history detail' });
     }
 });
+
 export default historyRouter;
