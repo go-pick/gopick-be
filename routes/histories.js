@@ -138,19 +138,26 @@ historyRouter.get('/:id', async (req, res) => {
 
         // 랭킹 데이터 생성
         const rankedData = scores.map(s => {
-            const v = s.product_variants;
-            const p = v.product;
-            return {
-                unique_id: s.variant_id,
-                name: p.name,
-                variant_name: v.variant_name,
-                brand: p.maker?.name || 'Unknown',
-                image_url: p.image_url,
-                price: v.price,
-                score: s.score,
-                specs: mergeSpecs(v)
-            };
-        });
+    const v = s.product_variants;
+    
+    // 1. variant가 없거나, 연결된 product가 없는 경우 방어
+    if (!v || !v.product) {
+        return null; 
+    }
+
+    const p = v.product;
+    
+    return {
+        unique_id: s.variant_id,
+        name: p.name || '이름 없음', 
+        variant_name: v.variant_name || '',
+        brand: p.maker?.name || '', // maker가 없을 수도 있음
+        image_url: p.image_url || '',
+        price: v.price,
+        score: s.score,
+        specs: mergeSpecs(v)
+    };
+}).filter(item => item !== null);
 
         res.json({
             rankedData: rankedData,
