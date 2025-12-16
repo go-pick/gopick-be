@@ -93,13 +93,25 @@ productRouter.get('/:productId', async (req, res) => {
         const { productId } = req.params;
         const { data, error } = await supabase
             .from('product')
-            .select('*, maker:maker_id(name)') // 제조사 이름 포함
+            .select(`
+                *,
+                maker:maker_id ( name ),
+                category:category_id ( specs ), 
+                variants:product_variants ( * )
+            `)
             .eq('id', productId)
             .single();
 
         if (error) throw error;
+        
+        // variants 정렬 (가격 낮은 순)
+        if (data.variants && data.variants.length > 0) {
+             data.variants.sort((a, b) => a.price - b.price);
+        }
+
         res.json(data);
     } catch (error) {
+        console.error("Fetch product detail failed:", error);
         res.status(500).json({ error: 'Fetch product failed' });
     }
 });
