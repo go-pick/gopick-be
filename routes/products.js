@@ -8,6 +8,7 @@ productRouter.get('/search', async (req, res) => {
         const { q, category } = req.query;
 
         // 1. 기본 쿼리 생성
+        // !inner는 해당 카테고리가 없는 제품은 아예 결과에서 제외한다는 뜻입니다. (Inner Join)
         let queryBuilder = supabase
             .from('product') 
             .select(`
@@ -19,20 +20,29 @@ productRouter.get('/search', async (req, res) => {
                 category:category_id!inner ( slug )
             `);
 
-        // 2. 카테고리 필터링 (다중 선택 지원)
+        // 2. 카테고리 필터링 (다중 선택 + 공백 제거)
         if (category) {
-            const categoryArray = category.split(',');
-            queryBuilder = queryBuilder.in('category.slug', categoryArray);
+            // [수정] 콤마 뒤에 공백이 있어도 작동하도록 trim() 추가
+            const categoryArray = category.split(',').map(c => c.trim()).filter(Boolean);
+            
+            if (categoryArray.length > 0) {
+                // category.slug가 배열 안에 있는 값 중 하나일 때 (OR Logic for Categories)
+                queryBuilder = queryBuilder.in('category.slug', categoryArray);
+            }
         }
 
-        // 3. [핵심 변경] 검색어 스플릿 및 OR 검색 적용
+        // 3. 검색어 스플릿 및 OR 검색 적용
         if (q) {
-            const terms = q.split(' ').filter(Boolean);
+            // [수정] 검색어 앞뒤 공백 제거
+            const terms = q.split(' ').map(t => t.trim()).filter(Boolean);
 
             if (terms.length > 0) {
+                // name에 첫 번째 단어가 포함되거나 OR 두 번째 단어가 포함되거나...
+                // SQL: AND ( name ILIKE '%term1%' OR name ILIKE '%term2%' )
                 const searchCondition = terms
                     .map(term => `name.ilike.%${term}%`)
                     .join(',');
+                
                 queryBuilder = queryBuilder.or(searchCondition);
             }
         }
