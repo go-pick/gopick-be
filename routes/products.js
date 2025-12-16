@@ -89,7 +89,19 @@ productRouter.get('/:productId/variants', async (req, res) => {
 });
 
 productRouter.get('/:productId', async (req, res) => {
+    try {
+        const { productId } = req.params;
+        const { data, error } = await supabase
+            .from('product')
+            .select('*, maker:maker_id(name)') // 제조사 이름 포함
+            .eq('id', productId)
+            .single();
 
+        if (error) throw error;
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: 'Fetch product failed' });
+    }
 });
 
 productRouter.post('/calculate', async (req, res) => {
