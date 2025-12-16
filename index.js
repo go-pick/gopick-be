@@ -17,7 +17,8 @@ const CLIENT = process.env.CLIENT_URL
 app.use(cors({
 	origin: [
 		CLIENT,
-		'http://localhost:3000'
+		'http://localhost:3000',
+		'https://go-pick.github.io/gopick-fe'
 	],
 	credentials: true,
 	optionsSuccessStatus: 200
