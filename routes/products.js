@@ -4,9 +4,10 @@ import { supabase } from '../config/supabaseClient.js';
 const productRouter = express.Router();
 
 productRouter.get('/search', async (req, res) => {
-	try {
+    try {
         const { q, category } = req.query;
-        // 1. Product 테이블 조회 (Maker 정보 Join)
+
+        // 1. 기본 쿼리 생성
         let queryBuilder = supabase
             .from('product') 
             .select(`
@@ -18,20 +19,29 @@ productRouter.get('/search', async (req, res) => {
                 category:category_id!inner ( slug )
             `);
 
-        // 2. 카테고리 필터링 (category 테이블의 slug 이용)
+        // 2. 카테고리 필터링 (다중 선택 지원)
         if (category) {
-            queryBuilder = queryBuilder.eq('category.slug', category);
+            const categoryArray = category.split(',');
+            queryBuilder = queryBuilder.in('category.slug', categoryArray);
         }
 
-        // 3. 이름 검색
+        // 3. [핵심 변경] 검색어 스플릿 및 OR 검색 적용
         if (q) {
-            queryBuilder = queryBuilder.ilike('name', `%${q}%`);
+            const terms = q.split(' ').filter(Boolean);
+
+            if (terms.length > 0) {
+                const searchCondition = terms
+                    .map(term => `name.ilike.%${term}%`)
+                    .join(',');
+                queryBuilder = queryBuilder.or(searchCondition);
+            }
         }
 
         const { data, error } = await queryBuilder;
+
         if (error) throw error;
 
-        // 프론트엔드 전달 포맷
+        // 4. 결과 포맷팅
         const formattedData = data.map(p => ({
             id: p.id,
             name: p.name,
@@ -41,8 +51,9 @@ productRouter.get('/search', async (req, res) => {
         }));
 
         res.json(formattedData);
+
     } catch (error) {
-        console.error(error);
+        console.error("Search API Error:", error);
         res.status(500).json({ error: 'Search failed' });
     }
 });
