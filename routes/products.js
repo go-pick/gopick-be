@@ -88,6 +88,10 @@ productRouter.get('/:productId/variants', async (req, res) => {
     }
 });
 
+productRouter.get('/:productId', async (req, res) => {
+
+});
+
 productRouter.post('/calculate', async (req, res) => {
     try {
         console.log("--------------- [BE] 계산 요청 시작 ---------------");
