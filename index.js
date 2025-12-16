@@ -14,11 +14,13 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const CLIENT = process.env.CLIENT_URL
 
+const clientOrigin = CLIENT ? new URL(CLIENT).origin : '';
+
 app.use(cors({
 	origin: [
-		CLIENT,
+		clientOrigin,
 		'http://localhost:3000',
-		'https://go-pick.github.io/gopick-fe'
+		// 'https://go-pick.github.io/'
 	],
 	credentials: true,
 	optionsSuccessStatus: 200
